@@ -48,7 +48,7 @@ def totalsegmentator(input, output, ml=False, nr_thr_resamp=1, nr_thr_saving=6,
             crop = None
             if not quiet: print("Using 'fast' option: resampling to lower resolution (3mm)")
         else:
-            task_id = [251, 252, 253, 254, 255]
+            task_id = [ 252 ]
             resample = 1.5
             trainer = "nnUNetTrainerV2_ep4000_nomirror"
             crop = None
