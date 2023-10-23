@@ -12,7 +12,7 @@ else:
 
 
 setup(name='TotalSegmentator',
-        version='1.5.6',
+        version='2.0.5',
         description='Robust segmentation of 104 classes in CT images.',
         long_description="See Readme.md on github for more details.",
         url='https://github.com/wasserth/TotalSegmentator',
@@ -25,20 +25,16 @@ setup(name='TotalSegmentator',
             'torch>=1.10.2',
             'numpy',
             'psutil',
-            # Any version <2.1.0 because of this issue: 
-            # https://github.com/SimpleITK/SimpleITK/issues/1433
             'SimpleITK',
             'nibabel>=2.3.0',
             'tqdm>=4.45.0',
             'p_tqdm',
             'xvfbwrapper',
             'fury',
-            'batchgenerators==0.21',
-            # This does not work if want to upload to pypi
-            # 'nnunet @ git+https://github.com/wasserth/nnUNet_cust@working_2022_03_18#egg=nnUNet'
-            'nnunet-customized==1.2',
+            'nnunetv2==2.1',
             f'requests{requests_version}',
-            'rt_utils'
+            'rt_utils',
+            'dicom2nifti'
         ],
         zip_safe=False,
         classifiers=[
@@ -48,9 +44,15 @@ setup(name='TotalSegmentator',
             'Operating System :: Unix',
             'Operating System :: MacOS'
         ],
-        scripts=[
-            'bin/TotalSegmentator', 'bin/totalseg_combine_masks', 'bin/crop_to_body', 
-            'bin/totalseg_import_weights', 'bin/totalseg_download_weights',
-            'bin/totalseg_setup_manually'
-        ]
+        entry_points={
+            'console_scripts': [
+                'TotalSegmentator=totalsegmentator.bin.TotalSegmentator:main',
+                'totalseg_combine_masks=totalsegmentator.bin.totalseg_combine_masks:main',
+                'crop_to_body=totalsegmentator.bin.crop_to_body:main',
+                'totalseg_import_weights=totalsegmentator.bin.totalseg_import_weights:main',
+                'totalseg_download_weights=totalsegmentator.bin.totalseg_download_weights:main',
+                'totalseg_setup_manually=totalsegmentator.bin.totalseg_setup_manually:main',
+                'totalseg_set_license=totalsegmentator.bin.totalseg_set_license:main'
+            ],
+        },
     )

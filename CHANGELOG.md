@@ -1,6 +1,44 @@
 ## Master
+
+
+## Release 2.0.5
+* downgrade nnunet to 2.1 to fix bug in `fast` model
+
+
+## Release 2.0.4
+* temporary fix of critical bug in `fast` model. Proper fix in next release.
+
+
+## LEGACY BUGFIX Release 1.5.7
+* download all weights from github releases instead of zenodo
+
+
+## Release 2.0.3
+* fix critical bug in `body` task postprocessing: sometimes all foreground removed
+
+
+## Release 2.0.2
+* allow more than 10 classes in `--roi_subset`
+* bugfix in `appendicular_bones` auxiliary mapping
+* in multilable output only show classes selected in `--roi_subset` if selected
+* make statistics work with dicom input
+
+
+## Release 2.0.1
+* add option `--v1_order` to use the old class order from v1
+
+
+## Release 2.0.0
+* train models with nnU-Net v2 (nnunet_cust dependency no longer needed)
+* roi_subset a lot faster, because cropping with 6mm low res model to roi first
+* more classes and improved training dataset (for details see `resources/improvements_in_v2.md`)
+* bugfix to make cli available on windows
 * bugfixes in dicom io
 * add `--skip_saving` argument
+* automatic tests on windows, linux and mac
+* statistics are not calculated anymore for ROIs which are cut off by the top or bottom of the image (use `stats_include_incomplete` to change this behaviour)
+* add postprocessing for body segmentation: remove small blobs
+* use dicom2nifti for dicom conversion instead of dcm2niix because easier to use across platforms
 
 
 ## Release 1.5.6

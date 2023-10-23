@@ -18,21 +18,26 @@ import torch
 
 from totalsegmentator.libs import nostdout
 
+# nnUNet 2.1
 with nostdout():
-    from nnunet.inference.predict import predict_from_folder
-    from nnunet.paths import default_plans_identifier, network_training_output_dir, default_trainer
+    from nnunetv2.inference.predict_from_raw_data import predict_from_raw_data
+# nnUNet 2.2
+# from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
+
+from nnunetv2.utilities.file_path_utilities import get_output_folder
 
 from totalsegmentator.map_to_binary import class_map, class_map_5_parts, map_taskid_to_partname
 from totalsegmentator.alignment import as_closest_canonical_nifti, undo_canonical_nifti
 from totalsegmentator.alignment import as_closest_canonical, undo_canonical
 from totalsegmentator.resampling import change_spacing
-from totalsegmentator.libs import combine_masks, compress_nifti, check_if_shape_and_affine_identical
+from totalsegmentator.libs import combine_masks, compress_nifti, check_if_shape_and_affine_identical, reorder_multilabel_like_v1
 from totalsegmentator.dicom_io import dcm_to_nifti, save_mask_as_rtstruct
 from totalsegmentator.cropping import crop_to_mask_nifti, undo_crop_nifti
 from totalsegmentator.cropping import crop_to_mask, undo_crop
-from totalsegmentator.postprocessing import remove_outside_of_mask, extract_skin
+from totalsegmentator.postprocessing import remove_outside_of_mask, extract_skin, remove_auxiliary_labels
+from totalsegmentator.postprocessing import keep_largest_blob_multilabel, remove_small_blobs_multilabel
 from totalsegmentator.nifti_ext_header import save_multilabel_nifti
-from totalsegmentator.statistics import get_basic_statistics_for_entire_dir
+from totalsegmentator.statistics import get_basic_statistics
 
 
 def _get_full_task_name(task_id: int, src: str="raw"):
@@ -88,6 +93,10 @@ def nnUNet_predict(dir_in, dir_out, task_id, model="3d_fullres", folds=None,
             for all folds: None
             for only fold 0: [0]
     """
+    with nostdout():
+        from nnunet.inference.predict import predict_from_folder
+        from nnunet.paths import default_plans_identifier, network_training_output_dir, default_trainer
+
     save_npz = False
     # num_threads_preprocessing = 6
     # num_threads_nifti_save = 2
@@ -121,10 +130,97 @@ def nnUNet_predict(dir_in, dir_out, task_id, model="3d_fullres", folds=None,
                         step_size=step_size, checkpoint_name=chk)
 
 
+def nnUNetv2_predict(dir_in, dir_out, task_id, model="3d_fullres", folds=None,
+                     trainer="nnUNetTrainer", tta=False,
+                     num_threads_preprocessing=3, num_threads_nifti_save=2,
+                     plans="nnUNetPlans", device="cuda", quiet=False):
+    """
+    Identical to bash function nnUNetv2_predict
+
+    folds:  folds to use for prediction. Default is None which means that folds will be detected 
+            automatically in the model output folder.
+            for all folds: None
+            for only fold 0: [0]
+    """
+    dir_in = str(dir_in)
+    dir_out = str(dir_out)
+
+    model_folder = get_output_folder(task_id, trainer, plans, model)
+
+    assert device in ['cpu', 'cuda',
+                           'mps'], f'-device must be either cpu, mps or cuda. Other devices are not tested/supported. Got: {device}.'
+    if device == 'cpu':
+        # let's allow torch to use hella threads
+        import multiprocessing
+        torch.set_num_threads(multiprocessing.cpu_count())
+        device = torch.device('cpu')
+    elif device == 'cuda':
+        # multithreading in torch doesn't help nnU-Net if run on GPU
+        torch.set_num_threads(1)
+        # torch.set_num_interop_threads(1)  # throws error if setting the second time
+        device = torch.device('cuda')
+    else:
+        device = torch.device('mps')
+    step_size = 0.5
+    disable_tta = not tta
+    verbose = False
+    save_probabilities = False
+    continue_prediction = False
+    chk = "checkpoint_final.pth"
+    npp = num_threads_preprocessing
+    nps = num_threads_nifti_save
+    prev_stage_predictions = None
+    num_parts = 1
+    part_id = 0
+    allow_tqdm = not quiet
+
+    # nnUNet 2.1
+    predict_from_raw_data(dir_in,
+                          dir_out,
+                          model_folder,
+                          folds,
+                          step_size,
+                          use_gaussian=True,
+                          use_mirroring=not disable_tta,
+                          perform_everything_on_gpu=True,
+                          verbose=verbose,
+                          save_probabilities=save_probabilities,
+                          overwrite=not continue_prediction,
+                          checkpoint_name=chk,
+                          num_processes_preprocessing=npp,
+                          num_processes_segmentation_export=nps,
+                          folder_with_segs_from_prev_stage=prev_stage_predictions,
+                          num_parts=num_parts,
+                          part_id=part_id,
+                          device=device)
+
+    # nnUNet 2.2
+    # predictor = nnUNetPredictor(
+    #     tile_step_size=step_size,
+    #     use_gaussian=True,
+    #     use_mirroring=not disable_tta,
+    #     perform_everything_on_gpu=True,
+    #     device=device,
+    #     verbose=verbose,
+    #     verbose_preprocessing=verbose,
+    #     allow_tqdm=allow_tqdm
+    # )
+    # predictor.initialize_from_trained_model_folder(
+    #     model_folder,
+    #     use_folds=folds,
+    #     checkpoint_name=chk,
+    # )
+    # predictor.predict_from_files(dir_in, dir_out,
+    #                              save_probabilities=save_probabilities, overwrite=not continue_prediction,
+    #                              num_processes_preprocessing=npp, num_processes_segmentation_export=nps,
+    #                              folder_with_segs_from_prev_stage=prev_stage_predictions, 
+    #                              num_parts=num_parts, part_id=part_id)
+
+
 def save_segmentation_nifti(class_map_item, tmp_dir=None, file_out=None, nora_tag=None, header=None, task_name=None, quiet=None):
     k, v = class_map_item
     # Have to load img inside of each thread. If passing it as argument a lot slower.
-    if task_name != "total" and not quiet:
+    if not task_name.startswith("total") and not quiet:
         print(f"Creating {v}.nii.gz")
     img = nib.load(tmp_dir / "s01.nii.gz")
     img_data = img.get_fdata()
@@ -140,7 +236,9 @@ def nnUNet_predict_image(file_in, file_out, task_id, model="3d_fullres", folds=N
                          resample=None, crop=None, crop_path=None, task_name="total", nora_tag="None", preview=False, 
                          save_binary=False, nr_threads_resampling=1, nr_threads_saving=6, force_split=False,
                          crop_addon=[3,3,3], roi_subset=None, output_type="nifti", 
-                         statistics=False, quiet=False, verbose=False, test=0, skip_saving=False):
+                         statistics=False, quiet=False, verbose=False, test=0, skip_saving=False,
+                         device="cuda", exclude_masks_at_border=True, no_derived_masks=False,
+                         v1_order=False):
     """
     crop: string or a nibabel image
     resample: None or float  (target spacing for all dimensions)
@@ -192,10 +290,11 @@ def nnUNet_predict_image(file_in, file_out, task_id, model="3d_fullres", folds=N
         img_in = nib.Nifti1Image(img_in_orig.get_fdata(), img_in_orig.affine)  # copy img_in_orig
 
         if crop is not None:
-            if crop == "lung" or crop == "pelvis" or crop == "heart":
-                combine_masks(crop_path, crop_path / f"{crop}.nii.gz", crop)
             if type(crop) is str:
-                crop_mask_img = nib.load(crop_path / f"{crop}.nii.gz")
+                if crop == "lung" or crop == "pelvis":
+                    crop_mask_img = combine_masks(crop_path, crop)
+                else:
+                    crop_mask_img = nib.load(crop_path / f"{crop}.nii.gz")
             else:
                 crop_mask_img = crop
             img_in, bbox = crop_to_mask(img_in, crop_mask_img, addon=crop_addon, dtype=np.int32,
@@ -271,8 +370,10 @@ def nnUNet_predict_image(file_in, file_out, task_id, model="3d_fullres", folds=N
                 for idx, tid in enumerate(task_id):
                     print(f"Predicting part {idx+1} of {len(task_id)} ...")
                     with nostdout(verbose):
-                        nnUNet_predict(tmp_dir, tmp_dir, tid, model, folds, trainer, tta,
-                                       nr_threads_resampling, nr_threads_saving)
+                        # nnUNet_predict(tmp_dir, tmp_dir, tid, model, folds, trainer, tta,
+                        #                nr_threads_resampling, nr_threads_saving)
+                        nnUNetv2_predict(tmp_dir, tmp_dir, tid, model, folds, trainer, tta,
+                                         nr_threads_resampling, nr_threads_saving, device=device, quiet=quiet)
                     # iterate over models (different sets of classes)
                     for img_part in img_parts:
                         (tmp_dir / f"{img_part}.nii.gz").rename(tmp_dir / "parts" / f"{img_part}_{tid}.nii.gz")
@@ -289,8 +390,10 @@ def nnUNet_predict_image(file_in, file_out, task_id, model="3d_fullres", folds=N
             if not quiet: print(f"Predicting...")
             if test == 0:
                 with nostdout(verbose):
-                    nnUNet_predict(tmp_dir, tmp_dir, task_id, model, folds, trainer, tta,
-                                   nr_threads_resampling, nr_threads_saving)
+                    # nnUNet_predict(tmp_dir, tmp_dir, task_id, model, folds, trainer, tta,
+                    #                nr_threads_resampling, nr_threads_saving)
+                    nnUNetv2_predict(tmp_dir, tmp_dir, task_id, model, folds, trainer, tta,
+                                     nr_threads_resampling, nr_threads_saving, device=device, quiet=quiet)
             # elif test == 2:
             #     print("WARNING: Using reference seg instead of prediction for testing.")
             #     shutil.copy(Path("tests") / "reference_files" / "example_seg_fast.nii.gz", tmp_dir / f"s01.nii.gz")
@@ -308,6 +411,24 @@ def nnUNet_predict_image(file_in, file_out, task_id, model="3d_fullres", folds=N
             nib.save(nib.Nifti1Image(combined_img, img_in_rsp.affine), tmp_dir / "s01.nii.gz")
 
         img_pred = nib.load(tmp_dir / "s01.nii.gz")
+
+        # Currently only relevant for T304 (appendicular bones)
+        img_pred = remove_auxiliary_labels(img_pred, task_name)
+
+        # Postprocessing multilabel (run here on lower resolution)
+        if task_name == "body":
+            img_pred_pp = keep_largest_blob_multilabel(img_pred.get_fdata().astype(np.uint8),
+                                                       class_map[task_name], ["body_trunc"], debug=False)
+            img_pred = nib.Nifti1Image(img_pred_pp, img_pred.affine)
+
+        if task_name == "body":
+            vox_vol = np.prod(img_pred.header.get_zooms())
+            size_thr_mm3 = 50000 / vox_vol
+            img_pred_pp = remove_small_blobs_multilabel(img_pred.get_fdata().astype(np.uint8),
+                                                        class_map[task_name], ["body_extremities"],
+                                                        interval=[size_thr_mm3, 1e10], debug=False)
+            img_pred = nib.Nifti1Image(img_pred_pp, img_pred.affine)
+
         if preview:
             from totalsegmentator.preview import generate_preview
             # Generate preview before upsampling so it is faster and still in canonical space 
@@ -331,7 +452,8 @@ def nnUNet_predict_image(file_in, file_out, task_id, model="3d_fullres", folds=N
             st = time.time()
             stats_dir = file_out.parent if multilabel_image else file_out
             stats_dir.mkdir(exist_ok=True)
-            get_basic_statistics_for_entire_dir(img_pred.get_fdata(), img_in_rsp, stats_dir / "statistics.json", quiet)
+            get_basic_statistics(img_pred.get_fdata(), img_in_rsp, stats_dir / "statistics.json", quiet, task_name,
+                                 exclude_masks_at_border)
             if not quiet: print(f"  calculated in {time.time()-st:.2f}s")
 
         if resample is not None:
@@ -380,9 +502,17 @@ def nnUNet_predict_image(file_in, file_out, task_id, model="3d_fullres", folds=N
                 else:
                     file_out.mkdir(exist_ok=True, parents=True)
                 if multilabel_image:
-                    # nib.save(nib.Nifti1Image(img_data, img_pred.affine, new_header), file_out)  # recreate nifti image to ensure uint8 dtype
+                    if v1_order and task_name == "total":
+                        img_data = reorder_multilabel_like_v1(img_data, class_map["total"], class_map["total_v1"])
+                        label_map = class_map["total_v1"]
+                    else:
+                        label_map = class_map[task_name]
+                    # Keep only voxel values corresponding to the roi_subset
+                    if roi_subset is not None:
+                        label_map = {k: v for k, v in label_map.items() if v in roi_subset}
+                        img_data *= np.isin(img_data, list(label_map.keys()))
                     img_out = nib.Nifti1Image(img_data, img_pred.affine, new_header)
-                    save_multilabel_nifti(img_out, file_out, class_map[task_name])
+                    save_multilabel_nifti(img_out, file_out, label_map)
                     if nora_tag != "None":
                         subprocess.call(f"/opt/nora/src/node/nora -p {nora_tag} --add {file_out} --addtag atlas", shell=True)
                 else:  # save each class as a separate binary image
@@ -418,9 +548,12 @@ def nnUNet_predict_image(file_in, file_out, task_id, model="3d_fullres", folds=N
                         # pool.join()
             if not quiet: print(f"  Saved in {time.time() - st:.2f}s")
 
-            # Postprocessing
-            if task_name == "lung_vessels":
-                remove_outside_of_mask(file_out / "lung_vessels.nii.gz", file_out / "lung.nii.gz")
+            # Postprocessing single files
+            #    (these not directly transferable to multilabel)
+
+            # Lung mask does not exist since I use 6mm model. Would have to save lung mask from 6mm seg.
+            # if task_name == "lung_vessels":
+            #     remove_outside_of_mask(file_out / "lung_vessels.nii.gz", file_out / "lung.nii.gz")
 
             # if task_name == "heartchambers_test":
             #     remove_outside_of_mask(file_out / "heart_myocardium.nii.gz", file_out / "heart.nii.gz", addon=5)
@@ -431,11 +564,12 @@ def nnUNet_predict_image(file_in, file_out, task_id, model="3d_fullres", folds=N
             #     remove_outside_of_mask(file_out / "aorta.nii.gz", file_out / "heart.nii.gz", addon=5)
             #     remove_outside_of_mask(file_out / "pulmonary_artery.nii.gz", file_out / "heart.nii.gz", addon=5)
 
-            if task_name == "body":
+            if task_name == "body" and not multilabel_image and not no_derived_masks:
                 if not quiet: print("Creating body.nii.gz")
-                combine_masks(file_out, file_out / "body.nii.gz", "body")
+                body_img = combine_masks(file_out, "body")
+                nib.save(body_img, file_out / "body.nii.gz")
                 if not quiet: print("Creating skin.nii.gz")
                 skin = extract_skin(img_in_orig, nib.load(file_out / "body.nii.gz"))
                 nib.save(skin, file_out / "skin.nii.gz")
 
-    return nib.Nifti1Image(img_data, img_pred.affine)
+    return nib.Nifti1Image(img_data, img_pred.affine), img_in_orig

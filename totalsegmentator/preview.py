@@ -3,6 +3,8 @@ import os
 import itertools
 import pickle
 from pathlib import Path
+from pprint import pprint
+import gc
 
 import nibabel as nib
 import numpy as np
@@ -19,35 +21,42 @@ random_colors = np.random.rand(100, 4)
 
 roi_groups = {
     "total": [
-        ['humerus_left', 'humerus_right', 'scapula_left', 'scapula_right', 'clavicula_left',
-         'clavicula_right', 'femur_left', 'femur_right', 'hip_left', 'hip_right', 'sacrum',
-         'colon', 'trachea'],
-        ['spleen', 'kidney_right', 'kidney_left', 'gallbladder',
-         'adrenal_gland_right', 'adrenal_gland_left',
-         'gluteus_medius_left', 'gluteus_medius_right',
-         'heart_atrium_left', 'heart_atrium_right', 'heart_myocardium'
-         ],
-        ['iliac_artery_left', 'iliac_artery_right', 'iliac_vena_left', 'iliac_vena_right',
-         'aorta', 'inferior_vena_cava',
-         'portal_vein_and_splenic_vein', 'esophagus'],
-        ['small_bowel', 'stomach', 'lung_upper_lobe_left',
-         'lung_upper_lobe_right', 'face'],
-        ['lung_lower_lobe_left', 'lung_middle_lobe_right', 'lung_lower_lobe_right',
-         'pancreas', 'brain'],
-        ['vertebrae_L5', 'vertebrae_L4', 'vertebrae_L3', 'vertebrae_L2',
-         'vertebrae_L1', 'vertebrae_T12', 'vertebrae_T11', 'vertebrae_T10', 'vertebrae_T9',
-         'vertebrae_T8', 'vertebrae_T7', 'vertebrae_T6', 'vertebrae_T5', 'vertebrae_T4',
-         'vertebrae_T3', 'vertebrae_T2', 'vertebrae_T1', 'vertebrae_C7', 'vertebrae_C6',
-         'vertebrae_C5', 'vertebrae_C4', 'vertebrae_C3', 'vertebrae_C2', 'vertebrae_C1',
-         'gluteus_maximus_left', 'gluteus_maximus_right'],
-        ['rib_left_1', 'rib_left_2', 'rib_left_3', 'rib_left_4', 'rib_left_5', 'rib_left_6',
-         'rib_left_7', 'rib_left_8', 'rib_left_9', 'rib_left_10', 'rib_left_11', 'rib_left_12',
-         'rib_right_1', 'rib_right_2', 'rib_right_3', 'rib_right_4', 'rib_right_5', 'rib_right_6',
-         'rib_right_7', 'rib_right_8', 'rib_right_9', 'rib_right_10', 'rib_right_11',
-         'rib_right_12', 'urinary_bladder', 'duodenum',
-         'gluteus_minimus_left', 'gluteus_minimus_right'],
-        ['liver', 'autochthon_left', 'autochthon_right', 'iliopsoas_left', 'iliopsoas_right',
-         'heart_ventricle_left', 'heart_ventricle_right', 'pulmonary_artery']
+        ["humerus_left", "humerus_right", "scapula_left", "scapula_right", "clavicula_left",
+         "clavicula_right", "femur_left", "femur_right", "hip_left", "hip_right", "sacrum",         
+        #  "patella", "tibia", "fibula", "tarsal", "metatarsal", "phalanges_feet", "ulna", "radius", "carpal", "metacarpal", "phalanges_hand",
+         "colon", "trachea", "skull"],
+        ["spleen", "kidney_right", "kidney_left", "gallbladder",
+         "adrenal_gland_right", "adrenal_gland_left",
+         "gluteus_medius_left", "gluteus_medius_right",
+         "heart",
+        #  "heart_atrium_left", "heart_atrium_right", "heart_myocardium",
+         "kidney_cyst_left", "kidney_cyst_right", "spinal_cord", "prostate", "thyroid_gland"],
+        ["iliac_artery_left", "iliac_artery_right", "iliac_vena_left", "iliac_vena_right",
+         "aorta", "inferior_vena_cava",
+         "portal_vein_and_splenic_vein", "esophagus",
+         "brachiocephalic_trunk", "subclavian_artery_right", "subclavian_artery_left", 
+         "common_carotid_artery_right", "common_carotid_artery_left",  
+         "atrial_appendage_left"],
+        ["small_bowel", "stomach", "lung_upper_lobe_left",
+         "lung_upper_lobe_right"],
+        ["lung_lower_lobe_left", "lung_middle_lobe_right", "lung_lower_lobe_right",
+         "pancreas", "brain"],
+        ["vertebrae_S1", "vertebrae_L5", "vertebrae_L4", "vertebrae_L3", "vertebrae_L2",
+         "vertebrae_L1", "vertebrae_T12", "vertebrae_T11", "vertebrae_T10", "vertebrae_T9",
+         "vertebrae_T8", "vertebrae_T7", "vertebrae_T6", "vertebrae_T5", "vertebrae_T4",
+         "vertebrae_T3", "vertebrae_T2", "vertebrae_T1", "vertebrae_C7", "vertebrae_C6",
+         "vertebrae_C5", "vertebrae_C4", "vertebrae_C3", "vertebrae_C2", "vertebrae_C1",
+         "gluteus_maximus_left", "gluteus_maximus_right"],
+        ["rib_left_1", "rib_left_2", "rib_left_3", "rib_left_4", "rib_left_5", "rib_left_6",
+         "rib_left_7", "rib_left_8", "rib_left_9", "rib_left_10", "rib_left_11", "rib_left_12",
+         "rib_right_1", "rib_right_2", "rib_right_3", "rib_right_4", "rib_right_5", "rib_right_6",
+         "rib_right_7", "rib_right_8", "rib_right_9", "rib_right_10", "rib_right_11",
+         "rib_right_12", "urinary_bladder", "duodenum",
+         "gluteus_minimus_left", "gluteus_minimus_right", "sternum", "costal_cartilages"],
+        ["liver", "autochthon_left", "autochthon_right", "iliopsoas_left", "iliopsoas_right",
+        #  "heart_ventricle_left", "heart_ventricle_right", "pulmonary_artery", 
+        "pulmonary_vein",
+         "superior_vena_cava", "brachiocephalic_vein_left", "brachiocephalic_vein_right"]
     ],
     "lung_vessels": [
         ["lung_trachea_bronchia"],
@@ -74,36 +83,44 @@ roi_groups = {
     "liver_vessels": [
         ["liver_vessels", "liver_tumor"]
     ],
-    "heartchambers_test": [
+    "vertebrae_body": [
+        ["vertebrae_body"]
+    ],
+    "heartchambers_highres": [
         ["heart_myocardium"],
         ["heart_atrium_left", "heart_ventricle_left"],
         ["heart_atrium_right", "heart_ventricle_right"],
         ["aorta", "pulmonary_artery"]
     ],
-    "bones_tissue_test": [
-        ["femur", "patella", "tibia", "fibula", "tarsal", "metatarsal", "phalanges_feet", 
-        "humerus", "ulna", "radius", "carpal", "metacarpal", "phalanges_hand", "sternum", 
-        "skull", "spinal_cord"],
-        ["subcutaneous_fat", "skeletal_muscle", "torso_fat"]
+    "appendicular_bones": [
+        ["patella", "tibia", "fibula", "tarsal", "metatarsal", "phalanges_feet", 
+         "ulna", "radius", "carpal", "metacarpal", "phalanges_hand"]
     ],
-    "aortic_branches_test": [
-        ["brachiocephalic_trunk", "subclavian_artery_right", "subclavian_artery_left", "aorta",
-        "common_carotid_artery_right", "common_carotid_artery_left"],
-        ["superior_vena_cava", 
-        "brachiocephalic_vein_left", "brachiocephalic_vein_right", "atrial_appendage_left"],
-        ["pulmunary_vein", "pulmunary_artery"],
-        ["heart_atrium_left", "heart_atrium_right", "thyroid_gland"]
+    "tissue_types": [
+        ["subcutaneous_fat"],
+        ["torso_fat"],
+        ["skeletal_muscle"]
     ],
+    "face": [
+        ["face"]
+    ],
+    # "aortic_branches_test": [
+    #     ["brachiocephalic_trunk", "subclavian_artery_right", "subclavian_artery_left", "aorta",
+    #     "common_carotid_artery_right", "common_carotid_artery_left"],
+    #     ["superior_vena_cava", 
+    #     "brachiocephalic_vein_left", "brachiocephalic_vein_right", "atrial_appendage_left"],
+    #     ["pulmonary_vein", "pulmonary_artery"],
+    #     ["heart_atrium_left", "heart_atrium_right", "thyroid_gland"]
+    # ],
     "test": [
-        ["carpal", "clavicula", "femur", "fibula", "humerus", "metacarpal", "metatarsal", 
-        "patella", "hips", "phalanges_hand", "radius", "ribs", "scapula", "skull", "spine", 
-        "sternum", "tarsal", "tibia", "phalanges_feet", "ulna"]
+        ["ulna"]
     ]
 }
 
+
 def plot_roi_group(ref_img, scene, rois, x, y, smoothing, roi_data, affine, task_name):
     # ref_img = nib.load(subject_path)
-    roi_actors = []
+    # roi_actors = []
 
     for idx, roi in enumerate(rois):
         color = random_colors[idx]
@@ -117,7 +134,7 @@ def plot_roi_group(ref_img, scene, rois, x, y, smoothing, roi_data, affine, task
             cont_actor = plot_mask(scene, data, affine, x, y, smoothing=smoothing,
                                 color=color, opacity=1)
             scene.add(cont_actor)
-            roi_actors.append(cont_actor)
+            # roi_actors.append(cont_actor)
 
 
 def plot_subject(ct_img, output_path, df=None, roi_data=None, smoothing=20,
@@ -160,7 +177,7 @@ def plot_subject(ct_img, output_path, df=None, roi_data=None, smoothing=20,
     #                  focal_point=(612., 331., 228.),
     #                  view_up=(0.0, 1.0, 0.0))
     
-    scene.projection(proj_type='parallel')
+    scene.projection(proj_type="parallel")
     scene.reset_camera_tight(margin_factor=1.02)  # need to do reset_camera=False in record for this to work in
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

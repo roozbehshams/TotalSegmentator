@@ -6,12 +6,13 @@ import zipfile
 from pathlib import Path
 import subprocess
 import platform
-from tqdm import tqdm
 
+from tqdm import tqdm
 import numpy as np
 import nibabel as nib
+import dicom2nifti
 
-from totalsegmentator.libs import get_config_dir
+from totalsegmentator.config import get_weights_dir
 
 
 
@@ -24,21 +25,24 @@ def download_dcm2niix():
     print("  Downloading dcm2niix...")
 
     if platform.system() == "Windows":
-        url = "https://github.com/rordenlab/dcm2niix/releases/latest/download/dcm2niix_win.zip"
+        # url = "https://github.com/rordenlab/dcm2niix/releases/latest/download/dcm2niix_win.zip"
+        url = "https://github.com/rordenlab/dcm2niix/releases/download/v1.0.20230411/dcm2niix_win.zip"
     elif platform.system() == "Darwin":  # Mac
-        raise ValueError("For MacOS automatic installation of dcm2niix not possible. Install it manually.")
-        # Problem: not zip files
-        # if platform.machine().startswith("arm") or platform.machine().startswith("aarch"):  # arm
-        #     url = "https://github.com/rordenlab/dcm2niix/releases/latest/download/macos_dcm2niix.pkg"
-        # else:  # intel
-        #     # unclear if this is the right link (is the same as for arm)
-        #     url = "https://github.com/rordenlab/dcm2niix/releases/latest/download/macos_dcm2niix.pkg"
+        # raise ValueError("For MacOS automatic installation of dcm2niix not possible. Install it manually.")
+        if platform.machine().startswith("arm") or platform.machine().startswith("aarch"):  # arm
+            # url = "https://github.com/rordenlab/dcm2niix/releases/latest/download/macos_dcm2niix.pkg"
+            url = "https://github.com/rordenlab/dcm2niix/releases/download/v1.0.20230411/dcm2niix_macos.zip"
+        else:  # intel
+            # unclear if this is the right link (is the same as for arm)
+            # url = "https://github.com/rordenlab/dcm2niix/releases/latest/download/macos_dcm2niix.pkg"
+            url = "https://github.com/rordenlab/dcm2niix/releases/download/v1.0.20230411/dcm2niix_macos.zip"
     elif platform.system() == "Linux":
-        url = "https://github.com/rordenlab/dcm2niix/releases/latest/download/dcm2niix_lnx.zip"
+        # url = "https://github.com/rordenlab/dcm2niix/releases/latest/download/dcm2niix_lnx.zip"
+        url = "https://github.com/rordenlab/dcm2niix/releases/download/v1.0.20230411/dcm2niix_lnx.zip"
     else:
         raise ValueError("Unknown operating system. Can not download the right version of dcm2niix.")
 
-    config_dir = get_config_dir()
+    config_dir = get_weights_dir()
 
     urllib.request.urlretrieve(url, config_dir / "dcm2niix.zip")
     with zipfile.ZipFile(config_dir / "dcm2niix.zip", 'r') as zip_ref:
@@ -57,14 +61,16 @@ def download_dcm2niix():
         os.remove(config_dir / "dcm2niibatch")
 
 
-def dcm_to_nifti(input_path, output_path, verbose=False):
+def dcm_to_nifti_LEGACY(input_path, output_path, verbose=False):
     """
+    Uses dcm2niix (does not properly work on windows)
+
     input_path: a directory of dicom slices
     output_path: a nifti file path
     """
     verbose_str = "" if verbose else "> /dev/null"
 
-    config_dir = get_config_dir()
+    config_dir = get_weights_dir()
 
     if command_exists("dcm2niix"):
         dcm2niix = "dcm2niix"
@@ -77,6 +83,11 @@ def dcm_to_nifti(input_path, output_path, verbose=False):
             download_dcm2niix()
 
     subprocess.call(f"\"{dcm2niix}\" -o {output_path.parent} -z y -f {output_path.name[:-7]} {input_path} {verbose_str}", shell=True)
+
+    if not output_path.exists():
+        print(f"Content of dcm2niix output folder ({output_path.parent}):")
+        print(list(output_path.parent.glob("*")))
+        raise ValueError("dcm2niix failed to convert dicom to nifti.")
 
     nii_files = list(output_path.parent.glob("*.nii.gz"))
 
@@ -98,6 +109,16 @@ def dcm_to_nifti(input_path, output_path, verbose=False):
         # todo: have to rename first file to not contain any counter which is automatically added by dcm2niix
 
     os.remove(str(output_path)[:-7] + ".json")
+
+
+def dcm_to_nifti(input_path, output_path, verbose=False):
+    """
+    Uses dicom2nifti package (also works on windows)
+
+    input_path: a directory of dicom slices
+    output_path: a nifti file path
+    """
+    dicom2nifti.dicom_series_to_nifti(input_path, output_path, reorient_nifti=True)
 
 
 def save_mask_as_rtstruct(img_data, selected_classes, dcm_reference_file, output_path):
